@@ -1,26 +1,36 @@
 from sklearn.datasets import load_iris
 from sklearn.model_selection import train_test_split
 from sklearn.linear_model import LogisticRegression
+from hummingbird.ml import convert
+from zipfile import ZipFile
+import shutil
+import os
 
-from skl2onnx import convert_sklearn
-from skl2onnx.common.data_types import FloatTensorType
+TORCH_FILE = 'iris.torch'
+TORCH_ARCHIVE = f'{TORCH_FILE}.zip' # the output of torch model save()
+TORCHSCRIPT_BLOB_SRC = 'deploy_model.zip' # internal (in zip) torchscript blob
+TORCHSCRIPT_BLOB_DEST = 'iris.pt' # output name for extracted torchscript blob
 
 # prepare the train and test data
 iris = load_iris()
 X, y = iris.data, iris.target
 X_train, X_test, y_train, y_test = train_test_split(X, y)
 
-# train a model
+# train the model - using logistic regression classifier
 model = LogisticRegression(max_iter=5000)
 model.fit(X_train, y_train)
 
-# convert the model to ONNX
-initial_types = [
-  ('input', FloatTensorType([None, 4]))
-]
-
-onnx_model = convert_sklearn(model, initial_types=initial_types)
+# use hummingbird.ml to convert sklearn model to torchscript model (torch.jit backend)
+torch_model = convert(model, 'torch.jit', test_input=X_train, extra_config={})
 
 # save the model
-with open("iris.onnx", "wb") as f:
-  f.write(onnx_model.SerializeToString())
+torch_model.save(TORCH_FILE)
+
+# extract the TorchScript binary payload
+with ZipFile(TORCH_ARCHIVE) as z:
+    with z.open(TORCHSCRIPT_BLOB_SRC) as zf, open(TORCHSCRIPT_BLOB_DEST, 'wb') as f:
+        shutil.copyfileobj(zf, f)
+
+# clean up - remove the zip file
+if os.path.exists(TORCH_ARCHIVE):
+    os.remove(TORCH_ARCHIVE)
